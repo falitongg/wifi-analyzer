@@ -1,93 +1,116 @@
-# nsi-semka
+# Wi-Fi Signal Monitor – Semestrální projekt NSI
+
+**Autor:** Anton Sokolov (sokolant), B0B37NSI<br>
+**Hardware:** Raspberry Pi Pico W<br>
+**Jazyk:** MicroPython, Python (Dashboard)<br>
+**Protokol:** MQTT (publish/subscribe), HTTP/REST
+
+---
+
+## Popis projektu
+
+Wi-Fi Signal Monitor je autonomní IoT zařízení postavené na platformě Raspberry Pi Pico W. Zařízení kontinuálně skenuje okolní Wi-Fi sítě, měří sílu jejich signálu (RSSI v dBm) a poskytuje uživateli lokální i vzdálenou diagnostiku.
+
+Systém je navržen pro běh v izolované lokální síti (hotspot notebooku) s využitím lokálního MQTT brokeru (Mosquitto). Data jsou vizualizována na webovém dashboardu ve formě histogramu všech viditelných sítí. Webový dashboard navíc slouží jako interaktivní řídicí panel, pomocí kterého lze vzdáleně konfigurovat periodu mezi jednotlivými skeny (v rozmezí od 5 do 150 sekund), nebo skenování na zařízení zcela vypnout.
+
+---
+
+## Uživatelské rozhraní (Hardware UI)
+
+Zařízení je vybaveno interaktivním ovládáním a vizuální signalizací:
+
+1. **Hlavní tlačítko (GP12):** Slouží k procházení seznamu nalezených sítí na OLED displeji. Stisk posune kurzor (`>`) dolů; po dosažení konce seznamu se kurzor vrátí na začátek.
+2. **Tlačítko BOOTSEL:** Přepíná mezi režimem **Přehled** (seznam sítí s kurzorem) a režimem **Detail** (podrobné informace o síti vybrané kurzorem).
+3. **LED Indikace:**
+* **Zelená LED:** Rozsvítí se na 1 sekundu, pokud je v novém skenu detekována síť, která v předchozím nebyla (nový uzel v dosahu).
+* **Červená LED:** Rozsvítí se na 1 sekundu, pokud některá ze sítí z předchozího skenu zmizela.
 
 
+4. **Aktivní bzučák:** V režimu **Detail** vydává varovný signál při poklesu RSSI pod kritickou mez (-80 dBm).
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Softwarová architektura a Data Flow
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### 1. Embedded část (Pico W)
 
-## Add your files
+Mikrokontrolér provádí periodické skenování (`wlan.scan()`). Interval skenování lze dynamicky měnit (od 5 do 150 sekund) nebo jej lze na základě příkazu z dashboardu zcela pozastavit. Po každém skenu:
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+* Porovná aktuální SSID s předchozím stavem pro aktivaci LED.
+* Aktualizuje OLED displej (zobrazuje Top-4 sítě, počítadlo skenů a kurzor).
+* Odešle kompletní pole nalezených sítí na MQTT broker.
+* Naslouchá MQTT zprávám pro změnu konfigurace (změna periody, vypnutí/zapnutí skenování).
+
+**Topic:** `nsi/wifi-monitor/telemetry`
+
+**Payload (JSON Array):**
+
+```json
+[
+  {"ssid": "Eduroam", "rssi": -65},
+  {"ssid": "MyLaptopHotspot", "rssi": -45},
+  {"ssid": "TP-Link_12", "rssi": -82}
+]
+
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.fel.cvut.cz/sokolant/nsi-semka.git
-git branch -M main
-git push -uf origin main
+
+### 2. Webový Dashboard (Flask)
+
+* **Backend:** Odebírá zprávy z MQTT a ukládá poslední stav do mezipaměti. Zároveň odesílá konfigurační příkazy zpět do Pico W.
+* **API:** Poskytuje endpoint `/api/data` pro frontend.
+* **Frontend:** Pomocí JavaScriptu a knihovny **Chart.js** vykresluje sloupcový graf (Bar Chart), kde osa X představuje SSID a osa Y sílu signálu.
+* **Vzdálená správa (Řízení zařízení):** Přímo v uživatelském rozhraní dashboardu má uživatel možnost nastavit prodlevu (periodu) mezi jednotlivými skeny v rozsahu 5 až 150 sekund a také funkci skenování na Pico W jednoduše úplně vypnout (případně znovu zapnout).
+
+---
+
+## Hardware a zapojení
+
+| Komponenta | Zapojení |
+| --- | --- |
+| Raspberry Pi Pico W | Řídící jednotka |
+| OLED displej 128×64 | I2C: SDA=GP0, SCL=GP1 |
+| LED zelená | GP15 + 100Ω rezistor |
+| LED červená | GP14 + 100Ω rezistor |
+| Aktivní bzučák | GP13 |
+| Mikrospínač | GP12 (interní pull-up) |
+| Tlačítko BOOTSEL | Integrované (přepínání režimů) |
+
+---
+
+## Instalace a spuštění
+
+1. **MQTT Broker:** Spusťte Mosquitto na notebooku (v rámci Wi-Fi hotspotu).
+2. **Pico W:** Nastavte IP adresu notebooku v `config.py` a nahrajte kód.
+3. **Dashboard:**
+
+```bash
+pip install flask paho-mqtt
+python app.py
+
+
 ```
 
-## Integrate with your tools
+4. Otevřete `http://localhost:5000` pro zobrazení histogramu a správu skenování.
 
-* [Set up project integrations](https://gitlab.fel.cvut.cz/sokolant/nsi-semka/-/settings/integrations)
+---
 
-## Collaborate with your team
+## Struktura repozitáře
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```text
+wifi-signal-monitor/
+├── pico_code/
+│   ├── main.py
+│   ├── config.py
+│   ├── wifi_scanner.py
+│   ├── display.py
+│   ├── indicators.py
+│   └── lib/ (ssd1306.py, umqtt.simple.py)
+├── dashboard/
+│   ├── app.py
+│   └── templates/
+│       └── index.html
+└── README.md
 
-## Test and Deploy
 
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```
