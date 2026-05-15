@@ -92,7 +92,7 @@ python app.py
 ```
 
 
-    * Aplikace při prvním spuštění automaticky vytvoří soubor `database.db`.
+* Aplikace při prvním spuštění automaticky vytvoří soubor `database.db`.
 
 
 
