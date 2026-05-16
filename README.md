@@ -64,11 +64,11 @@ Mikrokontrolér provádí periodické skenování a odesílá data na MQTT broke
 | Komponenta | Zapojení |
 | --- | --- |
 | Raspberry Pi Pico W | Řídící jednotka |
-| OLED displej 128×64 | I2C: SDA=GP0, SCL=GP1 |
-| LED zelená | GP15 + 100Ω rezistor |
-| LED červená | GP14 + 100Ω rezistor |
-| Aktivní bzučák | GP13 |
-| Mikrospínač | GP12 (interní pull-up) |
+| OLED displej 128×64 | I2C: SDA=20, SCL=21 |
+| LED green | GP15 + 100Ω rezistor |
+| LED red | GP14 + 100Ω rezistor |
+| Buzzer | GP13 + 100Ω rezistor |
+| Button | GP12 (interní pull-up) |
 
 ---
 
