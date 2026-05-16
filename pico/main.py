@@ -51,10 +51,13 @@ while True:
         need_screen_update = True
 
     if need_screen_update:
+        indicators.stop_beep()
+        
         if current_mode == "LIST":
             display.draw_list(wifi_data, selected_idx)
         elif current_mode == "DETAIL":
             display.draw_detail(wifi_data[selected_idx])
+            indicators.check_rssi(wifi_data[selected_idx]["rssi"])
 
 
 
