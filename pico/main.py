@@ -3,6 +3,7 @@ import time
 import config
 from display import DisplayManager
 from buttons import DebouncedButton, BootselButton
+import indicators
 
 led = Pin("LED", Pin.OUT)
 led.value(1)
@@ -27,15 +28,17 @@ wifi_data = [
 ]
 
 display.draw_list(wifi_data, selected_idx)
+
 while True:
+    indicators.update()
     current_time = time.ticks_ms()
     need_screen_update = False
 
-    if time.ticks_diff(current_time, last_wifi_scan_time) > SCAN_INTERVAL:
+    if time.ticks_diff(current_time, last_wifi_scan_time) > config.SCAN_INTERVAL:
         # TODO
         last_wifi_scan_time = current_time
 
-    if time.ticks_diff(current_time, last_mqtt_ping) > MQTT_PING_INTERVAL:
+    if time.ticks_diff(current_time, last_mqtt_ping) > config.MQTT_PING_INTERVAL:
         # TODO
         last_mqtt_ping = current_time
 
@@ -48,8 +51,13 @@ while True:
         need_screen_update = True
 
     if need_screen_update:
+        indicators.stop_beep()
+        
         if current_mode == "LIST":
             display.draw_list(wifi_data, selected_idx)
         elif current_mode == "DETAIL":
             display.draw_detail(wifi_data[selected_idx])
+            indicators.check_rssi(wifi_data[selected_idx]["rssi"])
+
+
 
