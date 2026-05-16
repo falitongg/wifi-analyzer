@@ -1,3 +1,14 @@
+# Hotspot settings
+WIFI_SSID =
+WIFI_PASSWORD =
+
+# MQTT settings
+MQTT_BROKER =
+MQTT_USER =
+MQTT_PASSWORD =
+MQTT_CLIENT_ID =
+MQTT_TOPIC =
+
 # Display settings
 SCL_PIN = 21
 SDA_PIN = 20
