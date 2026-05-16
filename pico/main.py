@@ -33,10 +33,24 @@ while True:
     need_screen_update = False
 
     if time.ticks_diff(current_time, last_wifi_scan_time) > config.SCAN_INTERVAL:
+        selected_ssid = None
+        if wifi_data and 0 <= selected_idx < len(wifi_data):
+            selected_ssid = wifi_data[selected_idx]['ssid']
+        
         wifi_data = scanner.scan()
         last_wifi_scan_time = current_time
-        if wifi_data:
-            selected_idx = min(selected_idx, len(wifi_data) - 1)
+        
+        if selected_ssid and wifi_data:
+            found = False
+            for i, net in enumerate(wifi_data):
+                if net['ssid'] == selected_ssid:
+                    selected_idx = i
+                    found = True
+                    break
+            
+            if not found:
+                if current_mode == "DETAIL":
+                    current_mode = "LIST"
         else:
             selected_idx = 0
             
@@ -62,6 +76,7 @@ while True:
         elif current_mode == "DETAIL":
             display.draw_detail(wifi_data[selected_idx])
             indicators.check_rssi(wifi_data[selected_idx]["rssi"])
+
 
 
 
