@@ -19,9 +19,8 @@ def update():
     global last_timer_beep, last_timer_green, last_timer_red
     current = time.ticks_ms()
     
-    if last_timer_beep != 0 and time.ticks_diff(current, last_timer_beep) >= 0:
-        buzzer.duty_u16(0)
-        last_timer_beep = 0
+    if last_timer_beep != -1 and time.ticks_diff(current, last_timer_beep) >= 0:
+        stop_beep()
         
     if last_timer_green != 0 and time.ticks_diff(current, last_timer_green) >= 0:
         led_green.value(0)
@@ -34,7 +33,16 @@ def update():
 def beep(duration_ms=300):
     global last_timer_beep
     buzzer.duty_u16(32768)
-    last_timer_beep = time.ticks_add(time.ticks_ms(), duration_ms)
+    
+    if duration_ms < 0:
+        last_timer_beep = -1
+    else:
+        last_timer_beep = time.ticks_add(time.ticks_ms(), duration_ms)
+
+def stop_beep():
+    global last_timer_beep
+    buzzer.duty_u16(0)
+    last_timer_beep = 0
     
 def network_status(connected):
     global last_timer_green, last_timer_red
@@ -50,7 +58,7 @@ def mqtt_error():
         
 def check_rssi(rssi):
     if rssi < -80:
-        beep(300)
+        beep(-1)
 
 def death():
     global last_timer_red
