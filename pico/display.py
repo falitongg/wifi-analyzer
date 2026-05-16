@@ -1,5 +1,6 @@
 from machine import Pin, I2C
 import ssd1306
+import time
 
 class DisplayManager:
     """
@@ -40,10 +41,13 @@ class DisplayManager:
         """
         self.clear()
         
+        count = len(networks)
+        
         # Draw header and a horizontal separator line
-        self.oled.text("Wi-Fi Networks:", 0, 0)
+        header = f"Wi-Fi [{selected_index + 1}/{count}]" if count > 0 else "Wi-Fi Networks:"
+        self.oled.text(header, 0, 0)
         self.oled.hline(0, 10, self.width, 1)
-
+        
         # Handle case where the network list is empty
         if not networks:
             self.oled.text("Scanning...", 0, 25)
@@ -59,8 +63,16 @@ class DisplayManager:
         for i in range(start_idx, min(len(networks), start_idx + 5)):
             # Add a cursor indicator ('>') for the currently selected item
             prefix = "> " if i == selected_index else "  "
-            self.oled.text(f"{prefix}{networks[i]['ssid']}", 0, y)
+            name = networks[i]['ssid'][:13] # cuts ssid to prevent collision
+            self.oled.text(f"{prefix}{name}", 0, y)
             y += 10 # Move down 10 pixels for the next line
+        
+        if count > 5:
+            self.oled.vline(127, 15, 49, 1) 
+            bar_height = max(5, int(49 * (5 / count)))
+            progress = selected_index / (count - 1)
+            bar_y = 15 + int((49 - bar_height) * progress)
+            self.oled.fill_rect(125, bar_y, 3, bar_height, 1)
             
         self.show()
         
@@ -83,13 +95,37 @@ class DisplayManager:
         self.oled.text("Network Detail:", 0, 0)
         self.oled.hline(0, 10, self.width, 1)
         
+        ssid = network['ssid']
+        text_width = len(ssid) * 8
+        
+        offset = 0
+        
+        if text_width > self.width:
+            max_offset = text_width - self.width
+            speed = 30
+            pause = 1000 // speed
+            cycle_len = max_offset * 2 + pause * 2
+            
+            t = (time.ticks_ms() // speed) % cycle_len
+            
+            if t < pause:
+                offset = 0
+            elif t < pause + max_offset:
+                offset = t - pause
+            elif t < pause * 2 + max_offset:
+                offset = max_offset
+            else:
+                offset = max_offset - (t - (pause * 2 + max_offset))
+                
         # Display specific network properties
-        self.oled.text(f"SSID: {network['ssid']}", 0, 15)
-        self.oled.text(f"RSSI: {network['rssi']} dBm", 0, 27)
-        self.oled.text(f"CH:   {network.get('channel', 'N/A')}", 0, 39)
+        self.oled.text("SSID:", 0, 15)
+        self.oled.text(ssid, -offset, 25)
+        self.oled.text(f"RSSI: {network['rssi']} dBm", 0, 36)
+        self.oled.text(f"CH:   {network.get('channel', 'N/A')}", 0, 46)
         
         # Display a warning if the signal strength is critically low
         if network['rssi'] < -80:
-            self.oled.text("! WEAK SIGNAL !", 0, 55)
+            if (time.ticks_ms() // 500) % 2 == 0:
+                self.oled.text("! WEAK SIGNAL !", 0, 56)
 
         self.show()
