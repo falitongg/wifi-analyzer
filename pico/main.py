@@ -4,6 +4,7 @@ import config
 from display import DisplayManager
 from buttons import DebouncedButton, BootselButton
 import indicators
+from wifi_scanner import WiFiScanner
 
 led = Pin("LED", Pin.OUT)
 led.value(1)
@@ -13,19 +14,16 @@ display = DisplayManager(scl_pin=config.SCL_PIN, sda_pin=config.SDA_PIN, width=c
 btn_next = DebouncedButton(config.BTN_NEXT_PIN, config.DEBOUNCE_DELAY)
 btn_bootsel = BootselButton(config.DEBOUNCE_DELAY)
 
+scanner = WiFiScanner()
+wifi_data = []
+
+
 current_mode = "LIST"  # LIST" or "DETAIL" state
 selected_idx = 0
 
 last_wifi_scan_time = 0
 last_mqtt_ping = 0
 
-
-wifi_data = [
-    {"ssid": "Eduroam", "rssi": -65, "channel": 1},
-    {"ssid": "Home_Network", "rssi": -45, "channel": 6},
-    {"ssid": "Free_WiFi", "rssi": -85, "channel": 11},
-    {"ssid": "Hidden_Net", "rssi": -72, "channel": 3},{"ssid": "Hidden_Net", "rssi": -72, "channel": 3},{"ssid": "Hidden_Net", "rssi": -72, "channel": 3},
-]
 
 display.draw_list(wifi_data, selected_idx)
 
@@ -35,8 +33,14 @@ while True:
     need_screen_update = False
 
     if time.ticks_diff(current_time, last_wifi_scan_time) > config.SCAN_INTERVAL:
-        # TODO
+        wifi_data = scanner.scan()
         last_wifi_scan_time = current_time
+        if wifi_data:
+            selected_idx = min(selected_idx, len(wifi_data) - 1)
+        else:
+            selected_idx = 0
+            
+        need_screen_update = True
 
     if time.ticks_diff(current_time, last_mqtt_ping) > config.MQTT_PING_INTERVAL:
         # TODO
