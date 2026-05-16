@@ -4,4 +4,5 @@ __pycache__/
 *.json
 .env
 *.db
+pico/config.py
 mosquitto/config/password_file
