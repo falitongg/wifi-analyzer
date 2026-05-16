@@ -38,7 +38,7 @@ class WiFiScanner:
         
         if new_networks:
             indicators.network_status(True)
-        elif lost_networks:
+        if lost_networks:
             indicators.network_status(False)
 
         self.previous_ssids = current_ssids

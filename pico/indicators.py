@@ -56,10 +56,21 @@ def network_status(connected):
 def mqtt_error():
     death()
         
-def check_rssi(rssi):
-    if rssi < -80:
-        beep(-1)
-
+def bad_rssi():
+    led_green.value(0)
+    led_red.value(1)
+    beep(-1)
+    
+def good_rssi():
+    led_red.value(0)
+    led_green.value(1)
+    stop_beep()
+    
+def clear_rssi():
+    led_green.value(0)
+    led_red.value(0)
+    stop_beep()
+    
 def death():
     global last_timer_red
     led_red.value(1)

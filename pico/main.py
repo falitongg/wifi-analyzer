@@ -24,13 +24,17 @@ selected_idx = 0
 last_wifi_scan_time = 0
 last_mqtt_ping = 0
 
-
+last_ui_update = 0
 display.draw_list(wifi_data, selected_idx)
 
 while True:
     indicators.update()
     current_time = time.ticks_ms()
     need_screen_update = False
+    
+    if current_mode == "DETAIL" and time.ticks_diff(current_time, last_ui_update) > 40:
+        need_screen_update = True
+        last_ui_update = current_time
 
     if time.ticks_diff(current_time, last_wifi_scan_time) > config.SCAN_INTERVAL:
         selected_ssid = None
@@ -69,14 +73,16 @@ while True:
         need_screen_update = True
 
     if need_screen_update:
-        indicators.stop_beep()
         
         if current_mode == "LIST":
+            indicators.clear_rssi()
             display.draw_list(wifi_data, selected_idx)
         elif current_mode == "DETAIL":
             display.draw_detail(wifi_data[selected_idx])
-            indicators.check_rssi(wifi_data[selected_idx]["rssi"])
-
-
-
-
+            
+            current_rssi = wifi_data[selected_idx]["rssi"]
+            if current_rssi < -80:
+                indicators.bad_rssi()
+            else:
+                indicators.good_rssi()
+                indicators.stop_beep()
