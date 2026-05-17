@@ -1,9 +1,15 @@
-from flask import Flask  # Importing the Flask module from the flask package  
- 
-app = Flask(__name__)
+from flask import Flask
+from config import SECRET_KEY
+from database import init_db
+from mqtt.mqtt_handler import start_mqtt
+from routes.api import api_bp
 
-@app.route('/')  # View function for endpoint '/'  
-def hello():  
-    return "<h1>Hello, World!</h1>"
-if __name__ == "__main__":  
-    app.run(host='0.0.0.0', port=5000, debug=True)
+app = Flask(__name__)
+app.secret_key = SECRET_KEY
+
+app.register_blueprint(api_bp)
+
+if __name__ == "__main__":
+    init_db()
+    start_mqtt()
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
