@@ -16,6 +16,8 @@ def get_db():
 def init_db():
     if not os.path.exists(DB_SCHEME_PATH):
         raise FileNotFoundError(f"{DB_SCHEME_PATH} not found!")
+    
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     conn = get_db()
     try:
