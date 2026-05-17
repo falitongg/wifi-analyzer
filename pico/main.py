@@ -7,6 +7,7 @@ UI updates when data arrives.
 
 from machine import Pin
 import time
+import ntptime
 import config
 from display import DisplayManager
 from buttons import DebouncedButton, BootselButton
@@ -37,12 +38,14 @@ mqtt    = MQTTManager(wlan)
 wifi_data    = []
 current_mode = "LIST"
 selected_idx = 0
+time_synced  = False
 
 last_scan_request_ms = 0
 last_mqtt_ping_ms    = 0
 last_ui_update_ms    = 0
 last_wlan_status_log = -999  # log status changes (avoid spam)
 last_mqtt_check_ms   = 0     # log MQTT status periodically
+last_ntp_attempt = 0
 
 # Flag to trigger UI update from callback
 _pending_ui_update = False
@@ -88,14 +91,30 @@ def on_scan_complete(results):
         print("[MQTT] Wi-Fi not up; requesting connect")
         mqtt.connect_wifi()
     elif mqtt.connected:
-        if mqtt.publish(wifi_data):
-            print(f"[MQTT] Published {len(results)} networks")
+        payload = {
+            "timestamp": get_timestamp() if time_synced else None,
+            "networks": wifi_data
+            }
+        if mqtt.publish(payload):
+            print(f"[MQTT] Published {len(results)} networks with timestamp")
         else:
             print("[MQTT] Publish failed")
     else:
         print("[MQTT] Not connected; attempting connect")
         mqtt.connect_mqtt()
 
+# NTP synchronization
+def ntp_sync():
+    ntptime.host = "192.168.137.1"
+    ntptime.settime()
+    print("[NTP] NTP synced: " + get_timestamp())
+
+# Timestamp ISO 8601
+def get_timestamp():
+    t = time.gmtime()
+    return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.000Z".format(
+            t[0], t[1], t[2], t[3], t[4], t[5]
+        )
 
 scanner = WiFiScanner(wlan, on_data_ready=on_scan_complete)
 
@@ -108,7 +127,7 @@ while True:
 
     # Execute one queued WLAN operation
     wlan.process()
-
+    
     # If a scan just completed, force UI update immediately
     # (don't wait for timer)
     if _pending_ui_update:
@@ -117,6 +136,15 @@ while True:
 
     current_time   = time.ticks_ms()
     need_ui_update = False
+    
+    if mqtt.is_wifi_up() and not time_synced:
+        if time.ticks_diff(current_time, last_ntp_attempt) > 10000:
+            try:
+                ntp_sync()
+                time_synced = True
+            except Exception as e:
+                print(f"[ERROR] NTP sync failed: {e}")
+
 
     # --- DETAIL view refresh ---
     if current_mode == "DETAIL" and \
@@ -195,3 +223,5 @@ while True:
                     indicators.stop_beep()
         except Exception as e:
             print(f"[ERROR] UI render failed: {e}")
+
+
