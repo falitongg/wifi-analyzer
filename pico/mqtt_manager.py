@@ -37,6 +37,13 @@ class MQTTManager:
             password=config.MQTT_PASSWORD,
             keepalive=60,
         )
+        
+        self.client.set_last_will(
+            config.MQTT_TOPIC_STATUS,
+            b"offline",
+            retain=True,
+            qos=1
+        )
         self.client.set_callback(self._on_message)
 
         self.connected       = False
@@ -75,9 +82,24 @@ class MQTTManager:
         print(f"[MQTT] {topic} -> {decoded}")
 
         if topic == config.MQTT_TOPIC_MANIPULATE:
-            self.scanning_enabled = (decoded.lower() == "on")
-            print(f"[INFO] Scanning {'enabled' if self.scanning_enabled else 'disabled'}")
-
+            cmd = decoded.lower()
+            if cmd == "on" and not self.scanning_enabled:
+                self.scanning_enabled = True
+                print("[INFO] Scanning enabled")
+            elif cmd == "off" and self.scanning_enabled:
+                self.scanning_enabled = False
+                print("[INFO] Scanning disabled")
+            elif cmd == "shutdown":
+                print("[INFO] Shutdown requested via MQTT — restarting in 1 s")
+                try:
+                    self.client.publish(
+                        config.MQTT_TOPIC_STATUS, b"offline", retain=True, qos=1
+                    )
+                except Exception:
+                    pass
+                time.sleep(1)
+                machine.reset()
+                
         elif topic == config.MQTT_TOPIC_INTERVAL:
             try:
                 secs = int(decoded)
@@ -133,7 +155,12 @@ class MQTTManager:
             # Subscribe to both control topics after a fresh connection
             self.client.subscribe(config.MQTT_TOPIC_INTERVAL)
             self.client.subscribe(config.MQTT_TOPIC_MANIPULATE)
-            print("[INFO] MQTT connected and subscribed")
+            
+            self.client.publish(
+                config.MQTT_TOPIC_STATUS, b"online", retain=True, qos=1
+            )
+            
+            print("[INFO] MQTT connected and subscribed, status=online")
             self.connected = True
             return True
         except Exception as e:
