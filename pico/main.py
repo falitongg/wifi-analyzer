@@ -68,7 +68,7 @@ def on_scan_complete(results):
         selected_ssid = wifi_data[selected_idx]['ssid']
 
     wifi_data = results
-
+    print("results")
     if selected_ssid and wifi_data:
         for i, net in enumerate(wifi_data):
             if net['ssid'] == selected_ssid:
@@ -105,7 +105,7 @@ def on_scan_complete(results):
 
 # NTP synchronization
 def ntp_sync():
-    ntptime.host = "192.168.137.1"
+    ntptime.host = config.NTP_HOST
     ntptime.settime()
     print("[NTP] NTP synced: " + get_timestamp())
 
@@ -139,6 +139,7 @@ while True:
     
     if mqtt.is_wifi_up() and not time_synced:
         if time.ticks_diff(current_time, last_ntp_attempt) > 10000:
+            last_ntp_attempt = current_time
             try:
                 ntp_sync()
                 time_synced = True
@@ -153,11 +154,13 @@ while True:
         last_ui_update_ms = current_time
 
     # --- Queue new scan on interval ---
-    if time.ticks_diff(current_time, last_scan_request_ms) > config.SCAN_INTERVAL:
-        print(f"[SCAN] Requesting scan (interval {config.SCAN_INTERVAL}ms)")
+    if mqtt.scanning_enabled and \
+       time.ticks_diff(current_time, last_scan_request_ms) > mqtt.scan_interval:
+        print(f"[SCAN] Requesting scan (interval {mqtt.scan_interval}ms)")
         scanner.request_scan()
         last_scan_request_ms = current_time
         need_ui_update = True
+        
 
     # --- Periodic WLAN status logging ---
     wlan_status = wlan.raw_status()
