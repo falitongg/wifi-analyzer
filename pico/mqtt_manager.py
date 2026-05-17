@@ -1,109 +1,204 @@
-import network
+"""
+MQTT client manager for the Pico W Wi-Fi monitor.
+
+Wi-Fi status checks and connection attempts are delegated to
+WLANManager so that this module never creates its own WLAN object.
+"""
+import socket
 import time
 import json
 from umqtt.simple import MQTTClient
 import config
 import indicators
 
+
 class MQTTManager:
-    def __init__(self):
-        self.wlan = network.WLAN(network.STA_IF)
+    """
+    Manages an MQTT session over the shared Wi-Fi interface.
+
+    Parameters
+    ----------
+    wlan_manager : WLANManager
+        Injected by main.py; used for Wi-Fi status queries and
+        queuing connection attempts.
+    """
+
+    # Minimum time between consecutive broker connection attempts (ms)
+    _MQTT_COOLDOWN_MS = 15_000
+
+    def __init__(self, wlan_manager):
+        self._wm = wlan_manager
+
         self.client = MQTTClient(
             client_id=config.MQTT_CLIENT_ID,
-            port=config.MQTT_PORT,
             server=config.MQTT_BROKER,
+            port=config.MQTT_PORT,
             user=config.MQTT_USER,
             password=config.MQTT_PASSWORD,
-            keepalive=60
+            keepalive=60,
         )
-        self.connected = False
-        self.failed_attempts = 0
-        
-        # Timers for non-blocking operations
-        self.last_wifi_attempt = 0
-        self.last_mqtt_attempt = 0
+        self.client.set_callback(self._on_message)
+
+        self.connected       = False
+        self.scanning_enabled = True
+        self.scan_interval   = config.SCAN_INTERVAL  # ms; may be updated via MQTT
+
+        self._last_mqtt_attempt = 0  # ticks_ms of last broker connect call
+    
+    def _is_broker_reachable(self):
+        """
+        Attempts a quick TCP connection to the broker.
+        Prevents blocking the main loop if the broker is down.
+        """
+        try:
+            s = socket.socket()
+            s.settimeout(1.0)
+            s.connect((config.MQTT_BROKER, config.MQTT_PORT))
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    # ------------------------------------------------------------------
+    # Incoming MQTT message handler
+    # ------------------------------------------------------------------
+
+    def _on_message(self, topic, msg):
+        """
+        Dispatch incoming MQTT messages to the appropriate handler.
+
+        topic and msg arrive as bytes from umqtt; msg is decoded here.
+        topic is compared directly as bytes against the config constants
+        (which are also defined as b'...' byte literals).
+        """
+        decoded = msg.decode().strip()
+        print(f"[MQTT] {topic} -> {decoded}")
+
+        if topic == config.MQTT_TOPIC_MANIPULATE:
+            self.scanning_enabled = (decoded.lower() == "on")
+            print(f"[INFO] Scanning {'enabled' if self.scanning_enabled else 'disabled'}")
+
+        elif topic == config.MQTT_TOPIC_INTERVAL:
+            try:
+                secs = int(decoded)
+                if 5 <= secs <= 150:
+                    self.scan_interval = secs * 1000
+                    print(f"[INFO] Scan interval set to {secs}s")
+            except ValueError:
+                pass  # ignore malformed payloads
+
+    # ------------------------------------------------------------------
+    # Wi-Fi helpers (delegated to WLANManager)
+    # ------------------------------------------------------------------
+
+    def is_wifi_up(self):
+        """Return True when the shared WLAN interface has an IP address."""
+        return self._wm.is_connected()
 
     def connect_wifi(self):
-        """Non-blocking Wi-Fi connection handler."""
-        self.wlan.active(True)
-        
-        if self.wlan.isconnected() and self.wlan.status() == 3:
-            return True
-            
-        current_time = time.ticks_ms()
-        
-        # Initiate connection only once every 10 seconds to prevent spamming
-        if time.ticks_diff(current_time, self.last_wifi_attempt) > 10000 or self.last_wifi_attempt == 0:
-            print(f'[INFO] Connecting to Wi-Fi... status={self.wlan.status()}')
-            self.wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
-            self.last_wifi_attempt = current_time
-            
-        return False
+        """Ask WLANManager to queue a Wi-Fi connection attempt."""
+        self._wm.request_connect()
+
+    # ------------------------------------------------------------------
+    # MQTT lifecycle
+    # ------------------------------------------------------------------
 
     def connect_mqtt(self):
-        """Non-blocking MQTT connection handler."""
-        current_time = time.ticks_ms()
+        """
+        Connect to the broker and subscribe to control topics.
+
+        Enforces _MQTT_COOLDOWN_MS between retries to avoid hammering
+        the broker on repeated failures.
+
+        Returns
+        -------
+        bool
+            True on success, False on failure or during cooldown.
+        """
+        now = time.ticks_ms()
+        if self._last_mqtt_attempt != 0 and \
+                time.ticks_diff(now, self._last_mqtt_attempt) < self._MQTT_COOLDOWN_MS:
+            return False
+
+        self._last_mqtt_attempt = now
         
-        # Try connecting to MQTT only once every 5 seconds
-        if time.ticks_diff(current_time, self.last_mqtt_attempt) > 5000 or self.last_mqtt_attempt == 0:
-            self.last_mqtt_attempt = current_time
-            try:
-                self.client.connect()
-                print("[INFO] MQTT connected")
-                self.connected = True
-                self.failed_attempts = 0
-                return True
-            except Exception as e:
-                self.connected = False
-                print(f'[ERROR] Failed to establish an MQTT connection: {e}')
-                self._handle_failure()
-                
-        return False
-
-    def publish_data(self, data):
-        """Non-blocking data publish."""
-        if not data:
+        print("[INFO] Probing MQTT broker...")
+        if not self._is_broker_reachable():
+            self.connected = False
+            print("[ERROR] Broker unreachable, skipping connect")
             return False
-
-        # Check and handle network connections silently
-        if not self.connect_wifi():
-            return False
-
-        if not self.connected:
-            if not self.connect_mqtt():
-                return False
-
-        payload = json.dumps(data)
-
-        # Execute a single attempt per call
+        
         try:
-            self.client.publish(config.MQTT_TOPIC, payload, qos=1)
-            print("[INFO] Data sent successfully")
-            self.failed_attempts = 0
+            self.client.connect()
+            # Subscribe to both control topics after a fresh connection
+            self.client.subscribe(config.MQTT_TOPIC_INTERVAL)
+            self.client.subscribe(config.MQTT_TOPIC_MANIPULATE)
+            print("[INFO] MQTT connected and subscribed")
+            self.connected = True
+            return True
+        except Exception as e:
+            self.connected = False
+            print(f"[ERROR] MQTT connect failed: {e}")
+            indicators.mqtt_error()
+            return False
+
+    def check_messages(self):
+        """
+        Poll the broker for any pending incoming messages.
+
+        Must be called every main-loop iteration for timely delivery.
+        Sets self.connected = False on any network error so the next
+        publish() call will attempt reconnection.
+        """
+        if not self.connected:
+            return
+        try:
+            self.client.check_msg()
+        except OSError:
+            self.connected = False
+
+    def ping(self):
+        """
+        Send a MQTT PINGREQ to keep the broker session alive.
+
+        Should be called on config.MQTT_PING_INTERVAL to prevent the
+        broker from closing the connection due to keepalive timeout.
+        """
+        if self.connected:
+            try:
+                self.client.ping()
+            except OSError:
+                self.connected = False
+
+    def publish(self, data):
+        """
+        Publish scan results as JSON to the telemetry topic.
+
+        Triggers Wi-Fi or MQTT reconnection automatically if either
+        link is down, then returns False so the caller can retry on
+        the next scan cycle.
+
+        Parameters
+        ----------
+        data : list
+            Scan result list from WiFiScanner.get_results().
+
+        Returns
+        -------
+        bool
+            True on successful publish, False otherwise.
+        """
+        if not self.is_wifi_up():
+            self.connect_wifi()
+            return False
+        if not self.connected:
+            self.connect_mqtt()
+            return False
+        try:
+            self.client.publish(config.MQTT_TOPIC_TELEMETRY, json.dumps(data))
+            print("[INFO] Published telemetry")
             return True
         except OSError as e:
             self.connected = False
-            print(f"[ERROR] MQTT publish failed: {e}")
-            self._handle_failure()
+            print(f"[ERROR] Publish failed: {e}")
             return False
-        
-    def ping(self):
-        if seld.connected:
-            try:
-                self.client.ping()
-                return True
-            except OSError as e:
-                self.connected = False
-                print(f"[ERROR] MQTT ping failed: {e}")
-                self._handle_failure()
-        return False
-            
-    def _handle_failure(self):
-        """Tracks failures and triggers error indicator after max retries."""
-        self.failed_attempts += 1
-        print(f"[WARNING] Attempt {self.failed_attempts}/3 failed")
-        
-        if self.failed_attempts >= 3:
-            print("[ERROR] Max retries reached, triggering indicator")
-            indicators.mqtt_error()
-            self.failed_attempts = 0
