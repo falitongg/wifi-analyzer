@@ -16,7 +16,6 @@ import network
 import time
 import config
 
-
 class WLANManager:
     """
     Single owner of the WLAN STA interface.
