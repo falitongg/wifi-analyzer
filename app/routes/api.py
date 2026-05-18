@@ -10,6 +10,9 @@ from config import TOPIC_MANIPULATE, TOPIC_INTERVAL
 
 api_bp = Blueprint("api", __name__)
 
+@api_bp.route("/health")
+def health():
+    return "ok", 200
 
 @api_bp.route("/")
 def index():
