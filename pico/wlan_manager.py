@@ -15,6 +15,7 @@ Call process() on every main-loop iteration to drain the queue.
 import network
 import time
 import config
+import ubinascii
 
 class WLANManager:
     """
@@ -123,9 +124,14 @@ class WLANManager:
         _executing prevents any re-entrant call (e.g. from a callback)
         from corrupting the queue mid-execution.
         """
+
         if self._executing or not self._queue:
             return
-
+        
+        next_op = self._queue[0][0]
+        if next_op == self._OP_SCAN and self._wlan.status() == 1:
+            return
+        
         op, callback = self._queue.pop(0)
         self._executing = True
 
@@ -163,10 +169,12 @@ class WLANManager:
         for net in raw:
             try:
                 ssid = net[0].decode('utf-8')
+                bssid = ubinascii.hexlify(net[1], ':').decode('utf-8').upper()
                 if not ssid:
                     continue
                 results.append({
                     'ssid':    ssid,
+                    'bssid':   bssid,
                     'rssi':    net[3],
                     'channel': net[2],
                 })

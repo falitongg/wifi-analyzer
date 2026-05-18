@@ -3,7 +3,7 @@ import queue
 
 from flask import Blueprint, render_template, jsonify, request, Response
 
-from database import get_scans, get_latest_scan
+from database import get_scans, get_latest_scan, get_scan_by_id
 from mqtt.mqtt_handler import mqtt_client, get_device_status
 from services import get_sse_queue
 from config import TOPIC_MANIPULATE, TOPIC_INTERVAL
@@ -20,8 +20,8 @@ def index():
 def toggle_scanner():
     body = request.get_json(force=True)
     state = body.get("state", "on").lower()
-    if state not in ("on", "off"):
-        return jsonify(error="state must be 'on' or 'off'"), 400
+    if state not in ("on", "off", "shutdown"):
+        return jsonify(error="state must be 'on', 'off' or 'shutdown'"), 400
 
     mqtt_client.publish(TOPIC_MANIPULATE, state)
     return jsonify(ok=True, state=state)
@@ -55,7 +55,7 @@ def list_scans():
     from_ts = request.args.get("from", "")
     to_ts = request.args.get("to", "")
     try:
-        limit = min(int(request.args.get("limit", 100)), 500)
+        limit = min(int(request.args.get("limit", 100)), 5000)
     except ValueError:
         limit = 100
 
@@ -67,6 +67,14 @@ def latest_scan():
     scan = get_latest_scan()
     if not scan:
         return jsonify(error="No scans found"), 404
+    return jsonify(scan)
+
+
+@api_bp.route("/scans/<int:scan_id>")
+def get_scan(scan_id):
+    scan = get_scan_by_id(scan_id)
+    if not scan:
+        return jsonify(error="Scan not found"), 404
     return jsonify(scan)
 
 

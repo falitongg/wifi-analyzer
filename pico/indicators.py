@@ -74,5 +74,6 @@ def clear_rssi():
 def death():
     global last_timer_red
     led_red.value(1)
+    led_green.value(1)
     beep(5000)
     last_timer_red = time.ticks_add(time.ticks_ms(), 5000)

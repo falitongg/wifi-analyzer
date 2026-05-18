@@ -10,7 +10,7 @@ import json
 from umqtt.simple import MQTTClient
 import config
 import indicators
-
+import machine
 
 class MQTTManager:
     """
@@ -58,12 +58,14 @@ class MQTTManager:
         Prevents blocking the main loop if the broker is down.
         """
         try:
+            addr = socket.getaddrinfo(config.MQTT_BROKER, config.MQTT_PORT)[0][-1]
             s = socket.socket()
             s.settimeout(1.0)
-            s.connect((config.MQTT_BROKER, config.MQTT_PORT))
+            s.connect(addr)
             s.close()
             return True
-        except OSError:
+        except OSError as e:
+            print(f"[DEBUG] Socket probe failed: {e}")
             return False
 
     # ------------------------------------------------------------------

@@ -1,1 +1,456 @@
-q
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wi-Fi Spectrum Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .table-hover tbody tr:hover { cursor: pointer; }
+        .chart-container { position: relative; height: 75vh; width: 100%; }
+        .history-list { max-height: 180px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-xl bg-body-tertiary mb-4 shadow-sm">
+    <div class="container-fluid gap-3">
+        <span class="navbar-brand mb-0 h1 fs-5">Wi-Fi Spectrum Analyzer</span>
+        
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div id="liveBadge" class="badge bg-success px-2 py-1.5">LIVE MODE</div>
+            <div id="mqttBadge" class="badge bg-secondary px-2 py-1.5">MQTT: Checking...</div>
+            <div id="deviceBadge" class="badge bg-secondary px-2 py-1.5">Device: Checking...</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3 ms-auto flex-wrap">
+            
+            <div class="d-flex align-items-center gap-2 border-end pe-3 border-secondary-subtle">
+                <span class="small fw-bold text-muted">Device:</span>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-outline-success btn-sm py-0 px-2" onclick="setScannerState('on', this)">ON</button>
+                    <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2" onclick="setScannerState('off', this)">OFF</button>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 border-end pe-3 border-secondary-subtle">
+                <span class="small fw-bold text-muted">Interval:</span>
+                <div class="input-group input-group-sm" style="width: 120px;">
+                    <input type="number" id="scanInterval" class="form-control form-control-sm py-0 text-center" min="5" max="150" value="10">
+                    <button class="btn btn-outline-primary py-0 px-2" type="button" onclick="setScannerInterval(this)">Set</button>
+                </div>
+            </div>
+
+            <div class="form-check form-switch mb-0 border-end pe-3 border-secondary-subtle">
+                <input class="form-check-input" type="checkbox" role="switch" id="themeToggle" checked>
+                <label class="form-check-label small text-muted" for="themeToggle">Dark Theme</label>
+            </div>
+            
+            <button class="btn btn-danger btn-sm px-2 py-0.5" onclick="sendShutdown()">⚠ Shutdown Pico</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+    <div class="row">
+        <div class="col-md-4 col-lg-3 mb-4">
+            
+            <div class="card mb-3 shadow-sm">
+                <div class="card-header py-2 fw-semibold">Stream Control</div>
+                <div class="card-body d-grid p-2">
+                    <button id="btnSwitchLive" class="btn btn-primary btn-sm" onclick="switchToLiveMode()" disabled>
+                        Switch to Live Stream
+                    </button>
+                </div>
+            </div>
+
+            <div class="card mb-3 shadow-sm">
+                <div class="card-header py-2 fw-semibold">Historical Records</div>
+                <div class="card-body p-3">
+                    <div class="mb-2">
+                        <label for="historyFrom" class="form-label small mb-1 text-muted">From:</label>
+                        <input type="datetime-local" id="historyFrom" class="form-control form-control-sm">
+                    </div>
+                    <div class="mb-3">
+                        <label for="historyTo" class="form-label small mb-1 text-muted">To:</label>
+                        <input type="datetime-local" id="historyTo" class="form-control form-control-sm">
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="fetchHistoryList()">
+                        Fetch Scans
+                    </button>
+                    
+                    <div class="list-group history-list d-none" id="historyListGroup">
+                        </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm">
+                <div class="card-header py-2 fw-semibold d-flex justify-content-between align-items-center">
+                    <span>Detected Networks</span>
+                    <button class="btn btn-outline-secondary btn-sm py-0 px-1" style="font-size: 0.7rem;" onclick="resetHighlight()">Clear Focus</button>
+                </div>
+                <div class="card-body p-0" style="max-height: 40vh; overflow-y: auto;">
+                    <table class="table table-hover table-sm m-0" id="networksTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>SSID</th>
+                                <th>MAC / Ch</th>
+                                <th>RSSI</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8 col-lg-9">
+            <div class="card shadow-sm">
+                <div class="card-body p-3">
+                    <div class="chart-container">
+                        <canvas id="wifiChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const htmlElement = document.documentElement;
+    const themeToggle = document.getElementById('themeToggle');
+    const liveBadge = document.getElementById('liveBadge');
+    const mqttBadge = document.getElementById('mqttBadge');
+    const deviceBadge = document.getElementById('deviceBadge');
+    const btnSwitchLive = document.getElementById('btnSwitchLive');
+    const historyListGroup = document.getElementById('historyListGroup');
+    
+    let isLiveMode = true;
+    let activeHighlight = null;
+    let latestNetworks = [];
+
+    // --- Chart.js Configuration ---
+    const ctx = document.getElementById('wifiChart').getContext('2d');
+    const wifiChart = new Chart(ctx, {
+        type: 'scatter', 
+        data: { datasets: [] },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 250 },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Wi-Fi Channel Number (2.4 GHz)' },
+                    min: 0,
+                    max: 15,
+                    ticks: { stepSize: 1 },
+                    grid: { color: 'rgba(255, 255, 255, 0.2)' }
+                },
+                y: {
+                    title: { display: true, text: 'RSSI Amplitude (dBm)' },
+                    min: -100,
+                    max: -30,
+                    grid: { color: 'rgba(255, 255, 255, 0.2)' }
+                }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.dataset.label}: ${context.raw.y} dBm`;
+                        }
+                    }
+                }
+            },
+            elements: {
+                point: { radius: 0 },
+                line: { tension: 0.4 }
+            }
+        }
+    });
+
+    function updateChartTheme(isDark) {
+        const gridColor = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)';
+        const textColor = isDark ? '#dee2e6' : '#212529';
+        wifiChart.options.scales.x.grid.color = gridColor;
+        wifiChart.options.scales.y.grid.color = gridColor;
+        wifiChart.options.scales.x.ticks.color = textColor;
+        wifiChart.options.scales.y.ticks.color = textColor;
+        wifiChart.update();
+    }
+
+    themeToggle.addEventListener('change', () => {
+        const isDark = themeToggle.checked;
+        htmlElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
+        updateChartTheme(isDark);
+    });
+
+    // --- Mathematical Signal Envelope Model ---
+    function generateBellCurve(channel, peakRssi) {
+        const points = [];
+        const width = 2.2; 
+        const minRssi = -100;
+        const step = 0.2;
+
+        for (let offset = -width; offset <= width; offset += step) {
+            const x = channel + offset;
+            const normalizedDist = Math.abs(offset) / width;
+            const y = minRssi + (peakRssi - minRssi) * (1 - Math.pow(normalizedDist, 2));
+            points.push({ x: parseFloat(x.toFixed(2)), y: parseFloat(y.toFixed(2)) });
+        }
+        return points;
+    }
+
+    function getColorFromMac(mac) {
+        let hash = 0;
+        for (let i = 0; i < mac.length; i++) hash = mac.charCodeAt(i) + ((hash << 5) - hash);
+        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+        return '#' + '00000'.substring(0, 6 - c.length) + c;
+    }
+
+    // --- Graph & Table Rendering Pipeline ---
+    function renderData() {
+        updateTable(latestNetworks);
+        
+        wifiChart.data.datasets = latestNetworks.map(net => {
+            const id = net.bssid || net.ssid;
+            const color = getColorFromMac(id);
+            const isHighlighted = activeHighlight === id;
+            const isDimmed = activeHighlight !== null && !isHighlighted;
+
+            return {
+                label: net.ssid,
+                bssid_ref: id,
+                data: generateBellCurve(net.channel, net.rssi),
+                borderColor: isDimmed ? color + '30' : color, 
+                backgroundColor: isHighlighted ? color + '75' : (isDimmed ? color + '08' : color + '35'),
+                borderWidth: isHighlighted ? 4 : (isDimmed ? 1 : 2),
+                fill: 'bottom',
+                showLine: true,
+                order: isHighlighted ? 0 : 1 
+            };
+        });
+
+        wifiChart.update();
+    }
+
+    function updateTable(networks) {
+        const tbody = document.querySelector('#networksTable tbody');
+        tbody.innerHTML = '';
+
+        const sorted = [...networks].sort((a, b) => {
+            const idA = a.bssid || a.ssid;
+            const idB = b.bssid || b.ssid;
+            if (idA === activeHighlight) return -1;
+            if (idB === activeHighlight) return 1;
+            return b.rssi - a.rssi;
+        });
+
+        sorted.forEach(net => {
+            const tr = document.createElement('tr');
+            const id = net.bssid || net.ssid;
+            
+            if (activeHighlight === id) tr.classList.add('table-primary');
+
+            tr.innerHTML = `
+                <td class="text-truncate" style="max-width: 110px;" title="${net.ssid}"><strong>${net.ssid}</strong></td>
+                <td>
+                    <div style="font-family: monospace; font-size: 0.85em;">${net.bssid || "N/A"}</div>
+                    <span class="badge bg-secondary" style="font-size:0.7rem; padding: 2px 4px;">Ch: ${net.channel}</span>
+                </td>
+                <td>${net.rssi}</td>
+            `;
+            
+            tr.onclick = () => {
+                activeHighlight = activeHighlight === id ? null : id;
+                renderData();
+            };
+            
+            tbody.appendChild(tr);
+        });
+    }
+
+    function resetHighlight() {
+        activeHighlight = null;
+        renderData();
+    }
+
+    // --- Real-Time Polling Engine ---
+    let lastScanId = null;
+    let livePollInterval = null;
+    let statusPollInterval = null;
+
+    function fetchLatestScan() {
+        if (!isLiveMode) return;
+        
+        fetch('/scans/latest')
+            .then(res => {
+                if (!res.ok) throw new Error("No data");
+                return res.json();
+            })
+            .then(data => {
+                if (data.id !== lastScanId) {
+                    lastScanId = data.id;
+                    latestNetworks = data.networks;
+                    renderData();
+                }
+            })
+            .catch(err => {});
+    }
+
+    function fetchDeviceStatus() {
+        fetch('/scanner/status')
+            .then(res => res.json())
+            .then(data => {
+                // MQTT connection status check
+                if (data.mqtt_connected) {
+                    mqttBadge.className = "badge bg-success px-2 py-1.5";
+                    mqttBadge.textContent = "MQTT: ONLINE";
+                } else {
+                    mqttBadge.className = "badge bg-danger px-2 py-1.5";
+                    mqttBadge.textContent = "MQTT: OFFLINE";
+                }
+
+                // Device LWT status check
+                if (data.device_status === "online") {
+                    deviceBadge.className = "badge bg-success px-2 py-1.5";
+                    deviceBadge.textContent = "DEVICE: ONLINE";
+                } else {
+                    deviceBadge.className = "badge bg-danger px-2 py-1.5";
+                    deviceBadge.textContent = `DEVICE: ${String(data.device_status).toUpperCase() || "OFFLINE"}`;
+                }
+            })
+            .catch(err => {
+                mqttBadge.className = "badge bg-secondary px-2 py-1.5";
+                deviceBadge.className = "badge bg-secondary px-2 py-1.5";
+            });
+    }
+
+    function startLivePolling() {
+        if (livePollInterval) clearInterval(livePollInterval);
+        if (statusPollInterval) clearInterval(statusPollInterval);
+        
+        livePollInterval = setInterval(fetchLatestScan, 2000);
+        statusPollInterval = setInterval(fetchDeviceStatus, 3000);
+        
+        fetchLatestScan();
+        fetchDeviceStatus();
+    }
+
+    startLivePolling();
+
+    // --- Database Lookups (History Mode Management) ---
+    function fetchHistoryList() {
+        let fromVal = document.getElementById('historyFrom').value;
+        let toVal = document.getElementById('historyTo').value;
+
+        let url = '/scans?limit=100';
+        if (fromVal) url += '&from=' + new Date(fromVal).toISOString();
+        if (toVal) url += '&to=' + new Date(toVal).toISOString();
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                historyListGroup.innerHTML = '';
+                if (data.length === 0) {
+                    historyListGroup.innerHTML = '<div class="list-group-item text-muted small">No scan logs found</div>';
+                } else {
+                    data.forEach(scan => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'list-group-item list-group-item-action small text-start';
+                        const formattedTime = new Date(scan.timestamp).toLocaleString();
+                        btn.innerHTML = `<div><strong>${formattedTime}</strong></div><div class="text-muted" style="font-size:0.75rem;">Detected Nodes: ${scan.count}</div>`;
+                        btn.onclick = () => loadHistoricalScan(scan.id);
+                        historyListGroup.appendChild(btn);
+                    });
+                }
+                historyListGroup.classList.remove('d-none');
+            })
+            .catch(err => alert("Failed to fetch historical inventory: " + err));
+    }
+
+    function loadHistoricalScan(scanId) {
+        fetch(`/scans/${scanId}`)
+            .then(res => res.json())
+            .then(data => {
+                isLiveMode = false;
+                liveBadge.textContent = "HISTORY MODE";
+                liveBadge.className = "badge bg-warning text-dark px-2 py-1.5";
+                btnSwitchLive.disabled = false;
+
+                latestNetworks = data.networks;
+                activeHighlight = null; 
+                renderData();
+            })
+            .catch(err => alert("Error recovering scan parameters: " + err));
+    }
+
+    function switchToLiveMode() {
+        isLiveMode = true;
+        liveBadge.textContent = "LIVE MODE";
+        liveBadge.className = "badge bg-success px-2 py-1.5";
+        btnSwitchLive.disabled = true;
+        resetHighlight();
+        lastScanId = null; 
+        fetchLatestScan();
+    }
+
+    // --- Device Control Commands via Toolbar ---
+    function setScannerState(state, btn) {
+        fetch('/scanner/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({state: state})
+        }).then(r => {
+            if(!r.ok) throw new Error("Server rejected the request");
+            const originalText = btn.innerText;
+            btn.innerText = "✓";
+            setTimeout(() => btn.innerText = originalText, 1200);
+        }).catch(err => alert("Error toggling scanner: " + err));
+    }
+
+    function setScannerInterval(btn) {
+        const intervalInput = document.getElementById('scanInterval');
+        const intervalVal = parseInt(intervalInput.value);
+        
+        if (isNaN(intervalVal) || intervalVal < 5 || intervalVal > 150) {
+            alert("Please enter a valid interval between 5 and 150 seconds.");
+            return;
+        }
+
+        fetch('/scanner/interval', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({interval: intervalVal})
+        }).then(r => {
+            if(!r.ok) throw new Error("Server rejected the request");
+            const originalText = btn.innerText;
+            btn.innerText = "✓";
+            btn.classList.replace('btn-outline-primary', 'btn-success');
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.replace('btn-success', 'btn-outline-primary');
+            }, 1200);
+        }).catch(err => alert("Error setting interval: " + err));
+    }
+
+    function sendShutdown() {
+        if(confirm("Warning! Dispatching the industrial MQTT Shutdown sequence terminates micro-controller routine execution (machine.reset).\n\nContinue?")) {
+            fetch('/scanner/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({state: 'shutdown'})
+            }).then(r => {
+                if(r.ok) alert("Hardware reset framework request acknowledged.");
+            });
+        }
+    }
+</script>
+</body>
+</html>

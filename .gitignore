@@ -5,4 +5,5 @@ __pycache__/
 .env
 *.db
 pico/config.py
+app/config.py
 mosquitto/config/password_file

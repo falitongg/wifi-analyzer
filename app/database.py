@@ -76,6 +76,26 @@ def get_scans(from_ts: str = "", to_ts: str = "", limit: int = 100) -> list:
     ]
 
 
+def get_scan_by_id(scan_id: int) -> dict | None:
+    """Return a single scan by its primary key, or None if not found."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id, timestamp, data FROM scans WHERE id = ?", (scan_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row["id"],
+        "timestamp": row["timestamp"],
+        "networks": json.loads(row["data"])
+    }
+
+
 def get_latest_scan() -> dict | None:
     """Return the most recent scan record, or None if the table is empty."""
     conn = get_db()
